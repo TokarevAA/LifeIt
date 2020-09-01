@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using LifeIt.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
@@ -12,30 +13,24 @@ namespace LifeIt
 {
 	internal class Program
 	{
-		private static readonly IConfiguration _configuration =
-			new ConfigurationBuilder()
-				.SetBasePath(AppContext.BaseDirectory)
-				.AddJsonFile("appsettings.json", false, true)
-				.Build();
-		
-		
 		private static async Task Main()
 		{
-			await using ServiceProvider serviceProvider = BuildServiceProvider();
-			
-			var logger = serviceProvider
+			using IHost host = BuildHost();
+			using IServiceScope servicesScope = host.Services.CreateScope();
+
+			var logger = servicesScope.ServiceProvider
 				.GetRequiredService<ILoggerFactory>()
 				.CreateLogger<Program>();
-
+			
 			logger.LogDebug("Startup");
-
+			
 			try
 			{
 				string artist = ReadArtist();
-
-				var albumService = serviceProvider.GetRequiredService<IAlbumService>();
+			
+				var albumService = servicesScope.ServiceProvider.GetRequiredService<IAlbumService>();
 				IEnumerable<string>? albums = await albumService.FetchAlbums(artist);
-
+			
 				if (albums == null)
 				{
 					Console.WriteLine($"Unable to fetch albums for '{artist}'");
@@ -57,20 +52,24 @@ namespace LifeIt
 		}
 
 
-		private static ServiceProvider BuildServiceProvider()
-		{
-			var result = new ServiceCollection();
+		private static IHost BuildHost() =>
+			new HostBuilder()
+				.ConfigureAppConfiguration((context, builder) =>
+				{
+					builder.SetBasePath(AppContext.BaseDirectory);
+					builder.AddJsonFile("appsettings.json", false, true);
+				})
+				.ConfigureServices((context, services) =>
+				{
+					services.AddHttpClient<IAlbumService, AppleITunesAlbumService>(client =>
+					{
+						client.BaseAddress = new Uri(context.Configuration["ITunesEndpoint"]);
+					});
+				})
+				.ConfigureLogging(builder => builder.AddConsole())
+				.Build();
 
-			result.AddLogging(config => config.AddConsole());
-			result.AddHttpClient<IAlbumService, AppleITunesAlbumService>(client =>
-			{
-				client.BaseAddress = new Uri(_configuration["ITunesEndpoint"]);
-			});
 
-			return result.BuildServiceProvider();
-		}
-		
-		
 		private static string ReadArtist()
 		{
 			while (true)

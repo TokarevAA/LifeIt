@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using LifeIt.Services;
@@ -20,17 +20,17 @@ namespace LifeIt
 			var logger = servicesScope.ServiceProvider
 				.GetRequiredService<ILoggerFactory>()
 				.CreateLogger<Program>();
-			
+
 			logger.LogDebug("Startup");
-			
+
 			try
 			{
 				string artist = ReadArtist();
-			
-				var albumService = servicesScope.ServiceProvider.GetRequiredService<IAlbumService>();
-				IEnumerable<string>? albums = await albumService.FetchAlbums(artist);
-			
-				if (albums == null)
+
+				var albumService = servicesScope.ServiceProvider.GetRequiredService<AlbumServiceFacade>();
+				string[] albums = await albumService.FetchAlbums(artist);
+
+				if (albums.Length == 0)
 				{
 					Console.WriteLine($"Unable to fetch albums for '{artist}'");
 				}
@@ -46,7 +46,7 @@ namespace LifeIt
 			{
 				logger.LogCritical("Unexpected error: " + ex);
 			}
-				
+
 			logger.LogDebug("Shutdown");
 		}
 
@@ -60,11 +60,15 @@ namespace LifeIt
 				})
 				.ConfigureServices((context, services) =>
 				{
-					services.AddSqliteCache(options => { options.CachePath = Path.Combine(Path.GetTempPath(), "albums_cache"); });
+					services.AddSqliteCache(options =>
+					{
+						options.CachePath = Path.Combine(Path.GetTempPath(), "albums_cache");
+					});
 					services.AddHttpClient<IAlbumService, AppleITunesAlbumService>(client =>
 					{
 						client.BaseAddress = new Uri(context.Configuration["ITunesEndpoint"]);
 					});
+					services.AddSingleton<AlbumServiceFacade>();
 				})
 				.ConfigureLogging(builder => builder.AddConsole())
 				.Build();
@@ -81,7 +85,7 @@ namespace LifeIt
 				{
 					return artist;
 				}
-				
+
 				Console.SetCursorPosition(0, Console.CursorTop - 1);
 			}
 		}

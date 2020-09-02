@@ -1,13 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
+using System.IO;
 using System.Threading.Tasks;
 using LifeIt.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Console;
-using Microsoft.Extensions.Options;
+using NeoSmart.Caching.Sqlite;
 
 namespace LifeIt
 {
@@ -61,6 +60,7 @@ namespace LifeIt
 				})
 				.ConfigureServices((context, services) =>
 				{
+					services.AddSqliteCache(options => { options.CachePath = Path.Combine(Path.GetTempPath(), "albums_cache"); });
 					services.AddHttpClient<IAlbumService, AppleITunesAlbumService>(client =>
 					{
 						client.BaseAddress = new Uri(context.Configuration["ITunesEndpoint"]);

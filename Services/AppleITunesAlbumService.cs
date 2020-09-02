@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -22,44 +22,70 @@ namespace LifeIt.Services
 		}
 
 
-		public async Task<IEnumerable<string>?> FetchAlbums(string artist)
+		public async Task<(Status, string[])> FetchAlbumsAsync(string artist)
 		{
-			string? artistId = await GetArtistId(artist);
+			(Status Status, string? Id) artistResult = await GetArtistId(artist);
 			
-			if (artistId == null)
+			if (artistResult.Status != Status.Ok)
 			{
 				_logger.LogWarning($"Unable to resolve artist id for '{artist}'");
-				return null;
+				return (artistResult.Status, Array.Empty<string>());
 			}
 
-			return await GetArtistAlbums(artistId);
+			return await GetArtistAlbums(artistResult.Id!);
 		}
 		
 		
-		private async Task<string?> GetArtistId(string artist)
+		private async Task<(Status, string?)> GetArtistId(string artist)
 		{
 			string normalizedArtist = artist.Replace(" ", "+");
-			Wrapper[]? wrappers = await ProcessQuery($"search?term={normalizedArtist}&limit=1");
+			(bool success, Wrapper[] wrappers) = await ProcessQuery($"search?term={normalizedArtist}&limit=1");
 
-			return wrappers?.FirstOrDefault()?.ArtistId;
+			if (success)
+			{
+				Status status = wrappers.Length > 0 ? Status.Ok : Status.NoData;
+				return (status, wrappers.ElementAtOrDefault(0)?.ArtistId);
+			}
+
+			return (Status.Failure, null);
 		}
 
-		private async Task<IEnumerable<string>?> GetArtistAlbums(string artistId)
+		private async Task<(Status, string[])> GetArtistAlbums(string artistId)
 		{
-			Wrapper[]? wrappers = await ProcessQuery($"lookup?id={artistId}&entity=album");
+			(bool success, Wrapper[] wrappers) = await ProcessQuery($"lookup?id={artistId}&entity=album");
 
-			return wrappers?
-				.Where(w => w.CollectionType == "Album")
-				.Select(w => w.CollectionName);
+			if (success)
+			{
+				Status status = wrappers.Length > 0 ? Status.Ok : Status.NoData;
+				string[] albums = wrappers
+					.Where(w => w.CollectionType == "Album")
+					.Select(w => w.CollectionName)
+					.ToArray();
+
+				return (status, albums);
+			}
+
+			return (Status.Failure, Array.Empty<string>());
 		}
 
-		private async Task<Wrapper[]?> ProcessQuery(string query)
+		private async Task<(bool, Wrapper[])> ProcessQuery(string query)
 		{
-			HttpResponseMessage searchResponse = await _httpClient.GetAsync(query);
+			HttpResponseMessage searchResponse;
+			
+			try
+			{
+				searchResponse = await _httpClient.GetAsync(query);
+			}
+			catch (HttpRequestException ex)
+			{
+				_logger.LogCritical("Exception during http request: " + ex);
+				return (false, Array.Empty<Wrapper>());
+			}
 
 			if (!searchResponse.IsSuccessStatusCode)
 			{
-				return null;
+				_logger.LogWarning("Unsuccessful status code: " + searchResponse.StatusCode);
+				return (false, Array.Empty<Wrapper>());
 			}
 
 			await using Stream searchResponseContent = await searchResponse.Content.ReadAsStreamAsync();
@@ -70,7 +96,7 @@ namespace LifeIt.Services
 			JsonSerializer serializer = new JsonSerializer();
 			var result = serializer.Deserialize<Result>(jsonTextReader);
 
-			return result!.Results;
+			return (true, result!.Results);
 		}
 	}
 }
